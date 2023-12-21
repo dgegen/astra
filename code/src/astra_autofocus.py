@@ -14,7 +14,7 @@ from astropy.coordinates import SkyCoord
 # from astra import Astra
 
 
-__all__ = ["AstraAutofocusDeviceManager"]
+__all__ = ["AstraAutofocusDeviceManager", "SQL3DatabaseHandler"]
 
 
 class SQL3DatabaseHandler(logging.Handler):

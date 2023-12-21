@@ -1447,6 +1447,9 @@ class Astra():
         # Yield to other threads
         time.sleep(0)
 
+        # Change exposure time in header
+        hdr['EXPTIME'] = exptime
+
         # Log information about the exposure
         log_option_tmp = "" if log_option is None else f"{log_option} "
         self.__log(
@@ -1531,7 +1534,7 @@ class Astra():
                 )
             self.__log("info",
                 f"Computing coordinates for the autofocus target with maximal zenith angle of "
-                "{maximal_zenith_angle} and selection method '{selection_method}'."
+                f"{maximal_zenith_angle} and selection method '{selection_method}'."
             )
 
             # Pointing the telescope
@@ -1818,6 +1821,7 @@ class Astra():
                     "NormalisedVariance": astrafmo.NormalizedVarianceFocusMeasure(),
                     "Tennegrad": astrafmo.TenengradFocusMeasure(),
                 },
+                keep_images=True,
             )
             self.__log("debug", f"Autofocus arguments: {autofocus_args}")
             
