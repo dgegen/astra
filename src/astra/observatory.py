@@ -8,21 +8,32 @@ from multiprocessing import Manager
 from pathlib import Path
 from threading import Thread
 
+import astrafocus.extremum_estimators as astrafee
+import astrafocus.focus_measure_operators as astrafmo
+import astrafocus.star_size_focus_measure_operators as astrasfmo
 import astropy.units as u
 import numpy as np
 import pandas as pd
 import psutil
 import yaml
-from astropy.coordinates import EarthLocation, SkyCoord, AltAz, get_body
+from astrafocus.autofocuser import (
+    AnalyticResponseAutofocuser,
+    NonParametricResponseAutofocuser,
+)
+from astrafocus.targeting.airmass_models import find_airmass_threshold_crossover
+from astrafocus.targeting.zenith_neighbourhood_query import ZenithNeighbourhoodQuery
+from astropy.coordinates import AltAz, EarthLocation, SkyCoord
 from astropy.io import fits
 from astropy.time import Time
 from astropy.wcs.utils import WCS
+from scipy import ndimage
 
 # https://github.com/dashawn888/sqlite3worker
 from sqlite3worker import Sqlite3Worker
 
 from astra import ASTRA_VER, Config, utils
 from astra.alpaca_device_process import AlpacaDevice
+from astra.autofocus import AstraAutofocusDeviceManager, SQL3DatabaseHandler
 from astra.guiding import Guider
 from astra.image_handler import create_image_dir, save_image
 from astra.logging_handler import LoggingHandler
@@ -133,9 +144,7 @@ class Observatory:
             self.schedule = self.read_schedule()
 
         # load devices
-        self.monitor_action_queue = (
-            {}
-        )  # queue for monitoring/running actions per device_name
+        self.monitor_action_queue = {}  # queue for monitoring/running actions per device_name
         self.devices = self.load_devices()
         self.last_image = None
 
@@ -1335,7 +1344,6 @@ class Observatory:
             schedule_mtime = self.get_schedule_mtime()
 
             if (schedule_mtime > self.schedule_mtime) or (self.schedule is None):
-
                 if self.schedule_running is True:
                     self.logger.warning(
                         "Schedule updating while the previous schedule is running. This will not take effect until the new schedule is run."
@@ -1564,6 +1572,9 @@ class Observatory:
             elif "complete_headers" == row["action_type"]:
                 self.final_headers()
 
+            elif "autofocus" == row["action_type"]:
+                self.autofocus(row, paired_devices)
+
             else:
                 self.error_source.append(
                     {
@@ -1723,7 +1734,6 @@ class Observatory:
             and self.check_conditions()
         ):
             if "Telescope" in paired_devices:
-
                 # open dome and unpark telescope -- this will open all domes if not in paired_devices...?
                 self.open_observatory(paired_devices)
 
@@ -2356,6 +2366,425 @@ class Observatory:
 
         return True
 
+    def determine_autofocus_calibration_field(self, row, action_value, hdr):
+        """Determine the calibration field for the autofocus.
+
+        This function determines the calibration field for the autofocus. It uses the following
+        parameters from the action_value:
+            - 'gaia_tmass_db_path': The path to the Gaia-Tmass database.
+            - 'maximal_zenith_angle': The maximal zenith angle in degrees. Default is None.
+            - 'airmass_threshold': The airmass threshold. Default is 1.01.
+            - 'g_mag_range': The range of g magnitudes. Default is (0, 10).
+            - 'j_mag_range': The range of j magnitudes. Default is (0, 10).
+            - 'fov_height': The height of the field of view in argmins. Default is 11.666666 / 60.
+            - 'fov_width': The width of the field of view in argmins. Default is 11.666666 / 60.
+            - 'selection_method': The method for selecting the calibration field.
+
+        In broad terms, the function determines the zenith neighbourhood of the observatory
+        and selects a star from it. The selection method can be one of the following:
+            - 'single': Select the star closest to zenith within the desired magnitude range
+               that is alone in the fov.
+            - 'maximal': Select the star closest to zenith within the desired magnitude range
+               that has the maximal number of neighbours in the fov.
+            - 'any': Select the star closest to zenith within the desired magnitude range.
+
+        If the selection method is unsuccessful, the function will attempt to autofocus at zenith.
+
+        Returns:
+            SkyCoord: The coordinates of the calibration field.
+
+        Raises:
+            ValueError: If no observatory location is found in the header.
+            ValueError: check_conditions return false.
+
+        # TODO: Verify action values.
+        """
+        # Find observatory location
+        try:
+            if not self.check_conditions(row=row):
+                raise ValueError("Autofocus aborted due to bad conditions.")
+            observatory_location = EarthLocation(
+                lat=hdr["LAT-OBS"] * u.deg,
+                lon=hdr["LONG-OBS"] * u.deg,
+                height=hdr["ALT-OBS"] * u.m,
+            )
+        except Exception as e:
+            raise ValueError("Error determining observatory location: {str(e)}.")
+
+        # Determine autofocus calibration_field
+        try:
+            if "gaia_tmass_db_path" not in action_value:
+                raise ValueError(
+                    "gaia_tmass_db_path not found among the action values."
+                )
+
+            # Deremine maximimal zenith angle
+            maximal_zenith_angle = action_value.get("maximal_zenith_angle", None)
+            if action_value.get("maximal_zenith_angle", None) is None:
+                maximal_zenith_angle = (
+                    find_airmass_threshold_crossover(
+                        airmass_threshold=action_value.get("airmass_threshold", 1.01)
+                    )
+                    * 180
+                    / np.pi
+                    * u.deg
+                )
+            self.logger.info(
+                f"Computing coordinates for the autofocus target with maximal zenith angle of "
+                f"{maximal_zenith_angle}."
+                f"and selection method '{selection_method}'."
+            )
+
+            # Pointing the telescope
+            zenith_neighbourhood_query = (
+                ZenithNeighbourhoodQuery.create_from_location_and_angle(
+                    db_path=action_value["gaia_tmass_db_path"],
+                    observatory_location=observatory_location,
+                    observation_time=action_value.get("observation_time", None),
+                    maximal_zenith_angle=maximal_zenith_angle,
+                )
+            )
+
+            self.logger.info(
+                "Zenith was determined to be at "
+                f"{zenith_neighbourhood_query.zenith_neighbourhood.zenith.icrs}."
+            )
+
+            # Obtain the full zenith_neighbourhood_query_result
+            znqr_full = zenith_neighbourhood_query.query_shardwise(n_sub_div=20)
+            self.logger.info(
+                f"Retrieved {len(znqr_full)} stars in the neighbourhood of the zenith from the database.",
+            )
+
+            # Mask by magnitude
+            znqr = znqr_full.mask_by_magnitude(
+                g_mag_range=action_value.get("g_mag_range", (0, 10)),
+                j_mag_range=action_value.get("j_mag_range", (0, 10)),
+            )
+            self.logger.info(
+                f"Retrieved {len(znqr)} stars in the neighbourhood of the zenith from the database "
+                "within the desired magnitude ranges.",
+            )
+            if not self.check_conditions(row=row):
+                raise ValueError("Autofocus aborted due to bad conditions.")
+
+            # Determine the number of stars that would be on the ccd
+            # if the telescope was centred on a given star
+            znqr.determine_stars_in_neighbourhood(
+                height=action_value.get("fov_height", 11.666666 / 60),
+                width=action_value.get("fov_width", 11.666666 / 60),
+            )
+            if not self.check_conditions(row=row):
+                raise ValueError("Autofocus aborted due to bad conditions.")
+
+            # Find the desired field of calibration
+            znqr.sort_values(["zenith_angle", "n"], ascending=[True, True])
+
+            selection_method = action_value.get("selection_method", "single")
+            # Select star
+            if selection_method == "single":
+                centre_coordinates = znqr.get_sky_coord_of_select_star(
+                    np.argmax(znqr.n == 1)
+                )
+            elif selection_method == "maximal":
+                centre_coordinates = znqr.get_sky_coord_of_select_star(
+                    np.argmax(znqr.n)
+                )
+            elif selection_method == "any":
+                centre_coordinates = znqr.get_sky_coord_of_select_star(0)
+            else:
+                self.logger.warning(
+                    f"Unknown selection_method: {selection_method}. Fall back to 'single'."
+                )
+                centre_coordinates = znqr.get_sky_coord_of_select_star(
+                    np.argmax(znqr.n == 1)
+                )
+
+            if centre_coordinates is None or not isinstance(
+                centre_coordinates, SkyCoord
+            ):
+                raise ValueError("No suitable calibration field found.")
+
+        except Exception as e:
+            if not self.check_conditions(row=row):
+                raise ValueError("Autofocus aborted due to bad conditions.")
+            self.logger.warning(
+                f"Error determining autofocus target coordinates: {str(e)}. "
+                "Attempt to autofocus at zenith.",
+            )
+            # Try to use the autofocus function at zenith.
+            try:
+                centre_coordinates = SkyCoord(
+                    AltAz(
+                        obstime=Time.now(),
+                        location=observatory_location,
+                        alt=90 * u.deg,
+                        az=0 * u.deg,
+                    )
+                ).icrs
+                self.logger.info("Autofocus target coordinates set to zenith.")
+            except Exception as e:
+                raise ValueError(
+                    f"Error determining zenith: {str(e)}."
+                    "This is likely due to an error in the observatory location in the header."
+                )
+
+        return centre_coordinates
+
+    def autofocus(self, row, paired_devices) -> bool:
+        """
+        Perform autofocus.
+
+        Parameters:
+            row (dict): A dictionary containing information about the sequence action:
+                - 'device_name': The name of the device.
+                - 'action_type': The type of action (e.g., 'object').
+                - 'action_value': The action's value (e.g., a command or parameter).
+            paired_devices (dict): A dictionary specifying paired devices for the sequence.
+
+        Returns:
+            bool: True if the autofocus was successful, False otherwise.
+        """
+
+        def determine_focus_measure_operator(action_value):
+            """Determine the focus measure operator from user input."""
+            focus_measure_operator = action_value.get("focus_measure_operator", "HFR")
+            if not isinstance(focus_measure_operator, str):
+                self.logger.warning(
+                    f"Invalid focus_measure_operator: {focus_measure_operator}."
+                    " Using HFR."
+                )
+                focus_measure_operator = astrasfmo.HFRStarFocusMeasure
+
+            if focus_measure_operator.lower() == "hfr":
+                focus_measure_operator = astrasfmo.HFRStarFocusMeasure
+            elif focus_measure_operator.lower() in ["gauss", "2dgauss"]:
+                focus_measure_operator = astrasfmo.GaussianStarFocusMeasure
+            # elif focus_measure_operator.lower() == 'moffat':  # TODO
+            #     focus_measure_operator = astrasfmo.MOFFAATStarFocusMeasure
+            elif focus_measure_operator.lower() in ["ffttan2022", "fft"]:
+                focus_measure_operator = astrafmo.FFTFocusMeasureTan2022
+            elif focus_measure_operator.lower() in [
+                "nv",
+                "var",
+                "normavar",
+                "normalizedvariance",
+            ]:
+                focus_measure_operator = astrafmo.NormalizedVarianceFocusMeasure
+            else:
+                self.logger.warning(
+                    f"Unknown focus_measure_operator: {focus_measure_operator}."
+                    " Using HFR."
+                )
+                focus_measure_operator = astrasfmo.HFRStarFocusMeasure
+            return focus_measure_operator
+
+        def determine_extremum_estimator(
+            action_value,
+        ) -> astrafee.RobustExtremumEstimator:
+            """Determine the extremum estimator from user input."""
+            extremum_estimator = action_value.get("extremum_estimator", "LOWESS")
+            if not isinstance(extremum_estimator, str):
+                self.logger.warning(
+                    f"Unknown extremum_estimator: {extremum_estimator}."
+                    " Using LOWESS.",
+                )
+
+            if extremum_estimator.lower() in ["lowess", "loess"]:
+                extremum_estimator = astrafee.LOWESSExtremumEstimator(
+                    frac=action_value.get("frac", 0.4), it=action_value.get("it", 5)
+                )
+            elif extremum_estimator.lower() in ["medianfilter", "medfil", "median"]:
+                astrafee.MedianFilterExtremumEstimation(
+                    size=action_value.get("size", 5)
+                )
+            elif extremum_estimator.lower() in ["spline"]:
+                astrafee.SplineExtremumEstimator(k=action_value.get("k", 3))
+            elif extremum_estimator.lower() in ["rbf"]:
+                astrafee.RBFExtremumEstimator(
+                    kernel=action_value.get("kernel", "linear"),
+                    smoothing=action_value.get("smoothing", 5),
+                )
+            else:
+                self.logger.warning(
+                    f"Unknown extremum_estimator: {extremum_estimator}."
+                    " Using LOWESS.",
+                )
+                extremum_estimator = astrafee.LOWESSExtremumEstimator(
+                    frac=action_value.get("frac", 0.4), it=action_value.get("it", 5)
+                )
+            return extremum_estimator
+
+        def reduce_exposure_time(
+            autofocus_device_manager: AstraAutofocusDeviceManager,
+            exposure_time: float,
+            reduction_factor: float = 2,
+            max_reduction_steps: int = 5,
+            minimal_exposure_time: float = 0.1,
+        ) -> float:
+            """Reduce exposure time if necessary to avoid saturation."""
+            new_exposure_time = exposure_time
+            for _ in range(max_reduction_steps):
+                if new_exposure_time < minimal_exposure_time:
+                    self.logger.warning(
+                        f"Minimal exposure time of {minimal_exposure_time} reached. "
+                        f"Cannot reduce exposure time further. Image might still be saturated.",
+                    )
+                    return new_exposure_time * reduction_factor
+
+                image = autofocus_device_manager.camera.perform_exposure(
+                    texp=new_exposure_time, use_light=True
+                )
+
+                clean = ndimage.median_filter(image, size=4, mode="mirror")
+                band_corr = np.median(clean, axis=1).reshape(-1, 1)
+                band_clean = clean - band_corr
+
+                if band_clean.max() > 0.9 * autofocus_device_manager.camera.maxadu:
+                    new_exposure_time = new_exposure_time / reduction_factor
+                else:
+                    break
+
+            if band_clean.max() > 0.9 * autofocus_device_manager.camera.maxadu:
+                self.logger.warning(
+                    f"Reduced exposure time of {exposure_time} s is still saturating. "
+                )
+            elif new_exposure_time != exposure_time:
+                self.logger.warning(
+                    f"Reduced exposure time from {exposure_time} to {new_exposure_time} "
+                    f"to avoid saturation.",
+                )
+
+            return new_exposure_time
+
+        # Add sql-database handler to include the logging from astrafocus in the database
+        db_handler = SQL3DatabaseHandler(self.cursor, logging.INFO)
+        logging.getLogger("astrafocus").addHandler(db_handler)
+
+        self.logger.info(f"Running autofocus for {row['device_name']}")
+        action_value, folder, hdr = self.pre_sequence(row, paired_devices)
+        if not self.check_conditions(row=row):
+            return False
+
+        # Determine autofocus calibration_field
+        try:
+            calibration_coordinates = self.determine_autofocus_calibration_field(
+                row, action_value, hdr
+            )
+        except Exception as e:
+            self.logger.error(
+                f"Error determining autofocus calibration field: {str(e)}."
+            )
+            self.error_source.append(
+                {
+                    "device_type": "Autofocuser",
+                    "device_name": paired_devices["Telescope"],
+                    "error": str(e),
+                }
+            )
+            return False
+
+        # Slew to calibration_field
+        action_value["ra"] = calibration_coordinates.ra.deg
+        action_value["dec"] = calibration_coordinates.dec.deg
+        try:
+            self.setup_observatory(paired_devices, action_value)
+        except Exception as e:
+            self.error_source.append(
+                {
+                    "device_type": "Autofocuser",
+                    "device_name": paired_devices["Telescope"],
+                    "error": str(e),
+                }
+            )
+            self.logger.error(
+                f"Error slewing to autofocus calibration field: {str(e)}."
+            )
+            return False
+
+        # Perform autofocus
+        try:
+            # Path to save pd.DataFrame containing the focus measure values for each exposure and
+            # focus position
+            save_path = CONFIG.paths.images / "autofocus_ref"
+            save_path.mkdir(exist_ok=True)
+
+            autofocus_device_manager = AstraAutofocusDeviceManager.from_row(
+                self, folder=save_path, row=row, paired_devices=paired_devices
+            )
+            focus_measure_operator = determine_focus_measure_operator(action_value)
+
+            # Reduce exposure time if necessary
+            if action_value.get("reduce_exposure_time", False):
+                # Clean image, CustomImageClass
+                exposure_time = reduce_exposure_time(
+                    autofocus_device_manager=autofocus_device_manager,
+                    exposure_time=action_value.get("exptime", 3.0),
+                    reduction_factor=2,
+                    max_reduction_steps=5,
+                    minimal_exposure_time=0.1,
+                )
+            else:
+                exposure_time = action_value.get("exptime", 3.0)
+
+            autofocus_args = dict(
+                autofocus_device_manager=autofocus_device_manager,
+                search_range=action_value.get(
+                    "search_range", None
+                ),  # None defaults to allowed focuser range
+                n_steps=action_value.get("n_steps", (30, 20)),
+                n_exposures=action_value.get("n_exposures", (1, 1)),
+                decrease_search_range=action_value.get("decrease_search_range", True),
+                exposure_time=exposure_time,
+                save_path=save_path,
+                secondary_focus_measure_operators={
+                    "FFTTan2022": astrafmo.FFTFocusMeasureTan2022(),
+                    "NormalisedVariance": astrafmo.NormalizedVarianceFocusMeasure(),
+                    "Tennegrad": astrafmo.TenengradFocusMeasure(),
+                },
+                focus_measure_operator_kwargs={
+                    "star_find_threshold": 2
+                },  # Todo needed?
+                keep_images=True,
+            )
+            self.logger.debug(f"Autofocus arguments: {autofocus_args}")
+
+            # TODO Remove Warmup
+            # _ = autofocus_device_manager.camera.perform_exposure(texp=5)
+
+            if issubclass(focus_measure_operator, astrasfmo.StarSizeFocusMeasure):
+                autofocuser = AnalyticResponseAutofocuser(
+                    focus_measure_operator=focus_measure_operator,
+                    percent_to_cut=action_value.get("percent_to_cut", 60),
+                    **autofocus_args,
+                )
+            else:
+                extremum_estimator = determine_extremum_estimator(action_value)
+                autofocuser = NonParametricResponseAutofocuser(
+                    focus_measure_operator=focus_measure_operator(),
+                    extremum_estimator=extremum_estimator,
+                    **autofocus_args,
+                )
+                self.logger.info(f"Using the extremum_estimator {extremum_estimator}")
+
+            # Run autofocus
+            if not self.check_conditions(row=row):
+                return False
+            success = autofocuser.run()
+
+        except Exception as e:
+            self.error_source.append(
+                {
+                    "device_type": "Autofocuser",
+                    "device_name": paired_devices["Telescope"],
+                    "error": str(e),
+                }
+            )
+            self.logger.exception(f"Error running autofocus: {str(e)}")
+            return False
+
+        return success
+
     def flats_sequence(self, row: dict, paired_devices: dict) -> None:
         """
         Performs a flats sequence.
@@ -2501,7 +2930,6 @@ class Observatory:
                 hdr["FILTER"] = filter_name
 
                 while self.check_conditions(row) and (count < action_value["n"][i]):
-
                     log_option = f"{count + 1}/{action_value['n'][i]}"
 
                     success, filepath = self.perform_exposure(
@@ -2517,7 +2945,6 @@ class Observatory:
                     if not success:
                         break
                     else:
-
                         # move telescope to flat position
                         self.flats_position(obs_location, paired_devices, row)
 
@@ -2599,7 +3026,6 @@ class Observatory:
                     time.sleep(1)
 
             if self.check_conditions(row) and take_flats:
-
                 target_altaz = SkyCoord(
                     alt=75 * u.deg,
                     az=sun_altaz.az + 180 * u.degree,
@@ -3316,4 +3742,6 @@ class Observatory:
                     }
                 )
                 self.logger.error(f"Queue get error: {str(e)}")
+                self.queue_running = False
+                self.queue_running = False
                 self.queue_running = False
