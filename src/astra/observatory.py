@@ -109,9 +109,7 @@ class Observatory:
         th = Thread(target=self.queue_get, daemon=True)
         th.start()
 
-        self.threads.append(
-            {"type": "queue", "device_name": "queue", "thread": th, "id": "queue"}
-        )
+        self.threads.append({"type": "queue", "device_name": "queue", "thread": th, "id": "queue"})
 
         # heartbeat dictionary
         self.heartbeat = {}
@@ -122,9 +120,7 @@ class Observatory:
 
         # log+polling backup flags
         self.run_backup = True
-        self.backup_time = datetime.strptime(
-            self.config["Misc"]["backup_time"], "%H:%M"
-        )
+        self.backup_time = datetime.strptime(self.config["Misc"]["backup_time"], "%H:%M")
 
         # error and weather handling flags
         self.error_free = True
@@ -353,9 +349,7 @@ class Observatory:
                             f"{device_type} {device_name} skipping connecting, because method not valid. - SPECULOOS specific"
                         )
                     else:
-                        self.devices[device_type][device_name].set(
-                            "Connected", True
-                        )  ## slow?
+                        self.devices[device_type][device_name].set("Connected", True)  ## slow?
                         self.logger.info(f"{device_type} {device_name} connected")
                 except Exception as e:
                     self.error_source.append(
@@ -365,27 +359,22 @@ class Observatory:
                             "error": str(e),
                         }
                     )
-                    self.logger.error(
-                        f"Error connecting to {device_type} {device_name}: {str(e)}"
-                    )
+                    self.logger.error(f"Error connecting to {device_type} {device_name}: {str(e)}")
 
         self.logger.info("Starting polling non-fixed fits headers")
 
         delay = 5  # seconds
         # start polling non-fixed fits headers
         for i, row in self.fits_config.iterrows():
-            if (
-                row["device_type"]
-                not in ["astropy_default", "astra", "astra_fixed", ""]
-            ) and row["fixed"] is False:
+            if (row["device_type"] not in ["astropy_default", "astra", "astra_fixed", ""]) and row[
+                "fixed"
+            ] is False:
                 device_type = row["device_type"]
                 if device_type in self.devices:
                     for device_name in self.devices[device_type]:
                         device = self.devices[device_type][device_name]
                         try:
-                            device.start_poll(
-                                row["device_command"], delay
-                            )  # 5 second polling
+                            device.start_poll(row["device_command"], delay)  # 5 second polling
                         except Exception as e:
                             self.error_source.append(
                                 {
@@ -641,9 +630,7 @@ class Observatory:
 
                         # log message saying weather unsafe
                         if weather_log_warning is False:
-                            self.logger.warning(
-                                "Weather unsafe from internal safety monitor"
-                            )
+                            self.logger.warning("Weather unsafe from internal safety monitor")
 
                         self.close_observatory()  # checks if already closed and closes if not
 
@@ -657,13 +644,10 @@ class Observatory:
                             time_since_last_unsafe = pd.to_timedelta(0)
 
                         current_time_to_safe = (
-                            max_safe_duration
-                            - time_since_last_unsafe.total_seconds() / 60
+                            max_safe_duration - time_since_last_unsafe.total_seconds() / 60
                         )
 
-                        self.time_to_safe = max(
-                            current_time_to_safe, internal_time_to_safe
-                        )
+                        self.time_to_safe = max(current_time_to_safe, internal_time_to_safe)
                     else:
                         self.time_to_safe = 0
 
@@ -678,9 +662,7 @@ class Observatory:
                             self.logger.info(
                                 f"Weather safe for the last {max(max_safe_duration, internal_max_safe_duration)} minutes"
                             )
-                            weather_log_warning = (
-                                False  # reset weather_log_warning flag
-                            )
+                            weather_log_warning = False  # reset weather_log_warning flag
                     else:
                         self.weather_safe = False  # set here too just in case watchdog started after weather unsafe?
                         weather_log_warning = True
@@ -768,10 +750,7 @@ class Observatory:
 
                     if self.speculoos:
                         # if not dome or telescope, park
-                        if (
-                            "Dome" not in device_types
-                            and "Telescope" not in device_types
-                        ):
+                        if "Dome" not in device_types and "Telescope" not in device_types:
                             self.logger.warning(
                                 f"(SPECULOOS EDIT): Closing observatory due to no errors in Dome or Telescope"
                             )
@@ -878,8 +857,7 @@ class Observatory:
                             ) - pd.to_datetime(rows[0][1], utc=True)
 
                             current_time_to_safe = (
-                                max_safe_duration
-                                - time_since_last_unsafe.total_seconds() / 60
+                                max_safe_duration - time_since_last_unsafe.total_seconds() / 60
                             )
 
                             if current_time_to_safe > longest_time_to_safe:
@@ -923,9 +901,7 @@ class Observatory:
 
     def update_heartbeat(self) -> None:
         # update heartbeat
-        self.heartbeat["datetime"] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S.%f")[
-            :-3
-        ]
+        self.heartbeat["datetime"] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
         self.heartbeat["error_free"] = self.error_free
         self.heartbeat["error_source"] = self.error_source
         self.heartbeat["weather_safe"] = self.weather_safe
@@ -956,21 +932,15 @@ class Observatory:
                             "error": str(e),
                         }
                     )
-                    self.logger.error(
-                        f"Error polling {device_type} {device_name}: {str(e)}"
-                    )
+                    self.logger.error(f"Error polling {device_type} {device_name}: {str(e)}")
                     polled = None
 
                 if polled is not None:  # not sure if correct to put this here, or later
                     polled_keys = polled.keys()
                     for k in polled_keys:
                         polled_list[device_type][device_name][k] = {}
-                        polled_list[device_type][device_name][k]["value"] = polled[k][
-                            "value"
-                        ]
-                        polled_list[device_type][device_name][k]["datetime"] = polled[
-                            k
-                        ]["datetime"]
+                        polled_list[device_type][device_name][k]["value"] = polled[k]["value"]
+                        polled_list[device_type][device_name][k]["datetime"] = polled[k]["datetime"]
 
         self.heartbeat["polling"] = polled_list
         self.heartbeat["monitor-action-queue"] = self.monitor_action_queue
@@ -981,17 +951,13 @@ class Observatory:
                 telescope = self.devices["Telescope"][telescope_name]
 
                 # check telescope status
-                valid, all_errors, messages = utils.check_astelos_error(
-                    telescope, close=close
-                )
+                valid, all_errors, messages = utils.check_astelos_error(telescope, close=close)
 
                 if valid and len(all_errors) > 0:
                     self.logger.info(
                         f"Attempting to acknowledge AsTelOS errors for {telescope_name}: {messages}"
                     )
-                    ack, messages = utils.ack_astelos_error(
-                        telescope, valid, all_errors, messages
-                    )
+                    ack, messages = utils.ack_astelos_error(telescope, valid, all_errors, messages)
 
                     if ack:
                         self.logger.info(
@@ -1017,9 +983,7 @@ class Observatory:
                             "error": "AsTelOS errors not valid",
                         }
                     )
-                    self.logger.error(
-                        f"AsTelOS errors invalid for {telescope_name}: {messages}"
-                    )
+                    self.logger.error(f"AsTelOS errors invalid for {telescope_name}: {messages}")
 
     def open_observatory(self, paired_devices: dict | None = None) -> None:
         """
@@ -1094,9 +1058,7 @@ class Observatory:
                 for telescope_name in self.devices["Telescope"]:
                     telescope = self.devices["Telescope"][telescope_name]
 
-                    r = telescope.get(
-                        "CommandString", Command="TELESCOPE.READY_STATE", Raw=True
-                    )
+                    r = telescope.get("CommandString", Command="TELESCOPE.READY_STATE", Raw=True)
 
                     while float(r) != 1:
                         self.logger.info(f"Waiting for {telescope_name} to be ready")
@@ -1116,9 +1078,7 @@ class Observatory:
                                     "error": "Timeout waiting for telescope to be ready",
                                 }
                             )
-                            self.logger.error(
-                                f"Timeout waiting for {telescope_name} to be ready"
-                            )
+                            self.logger.error(f"Timeout waiting for {telescope_name} to be ready")
                             break
 
                         if float(r) == 1:
@@ -1131,9 +1091,7 @@ class Observatory:
                                     "error": f"Issue with telescope getting ready, status: {r}",
                                 }
                             )
-                            self.logger.error(
-                                f"Issue with telescope getting ready, status: {r}"
-                            )
+                            self.logger.error(f"Issue with telescope getting ready, status: {r}")
 
     def close_observatory(
         self, paired_devices: dict | None = None, error_sensitive: bool = True
@@ -1456,11 +1414,7 @@ class Observatory:
             # loop through schedule
             for i, row in self.schedule.iterrows():
                 # if schedule item not running, start thread if conditions are met
-                if (
-                    (i not in ids)
-                    and self.check_conditions(row)
-                    and (row["completed"] is False)
-                ):
+                if (i not in ids) and self.check_conditions(row) and (row["completed"] is False):
                     th = Thread(target=self.run_action, args=(row,), daemon=True)
                     th.start()
 
@@ -1525,9 +1479,7 @@ class Observatory:
                 paired_devices = self.config["Camera"][cam_index]["paired_devices"]
                 paired_devices["Camera"] = row["device_name"]
                 set_temperature = self.config["Camera"][cam_index]["temperature"]
-                temperature_tolerance = self.config["Camera"][cam_index][
-                    "temperature_tolerance"
-                ]
+                temperature_tolerance = self.config["Camera"][cam_index]["temperature_tolerance"]
 
                 if row["action_type"] not in ["close", "open"]:
                     self.cool_camera(row, set_temperature, temperature_tolerance)
@@ -1589,9 +1541,7 @@ class Observatory:
 
             # set 'completed' flag to True if ended under normal conditions
             if self.error_free and self.schedule_running and self.watchdog_running:
-                if (
-                    row["action_type"] in ["calibration", "close"]
-                ) or self.weather_safe:
+                if (row["action_type"] in ["calibration", "close"]) or self.weather_safe:
                     self.schedule.loc[row.name, "completed"] = True
 
         except Exception as e:
@@ -1603,9 +1553,7 @@ class Observatory:
                     "error": str(e),
                 }
             )
-            self.logger.error(
-                f"Run action error: {str(e)}", exc_info=True, stack_info=True
-            )
+            self.logger.error(f"Run action error: {str(e)}", exc_info=True, stack_info=True)
 
     def cool_camera(
         self, row: dict, set_temperature: float, temperature_tolerance: float = 1
@@ -1723,16 +1671,10 @@ class Observatory:
 
         """
 
-        self.logger.debug(
-            f"Running setup_observatory for {paired_devices} {action_value}"
-        )
+        self.logger.debug(f"Running setup_observatory for {paired_devices} {action_value}")
 
         # unpark and slew to target
-        if (
-            ("ra" in action_value)
-            and ("dec" in action_value)
-            and self.check_conditions()
-        ):
+        if ("ra" in action_value) and ("dec" in action_value) and self.check_conditions():
             if "Telescope" in paired_devices:
                 # open dome and unpark telescope -- this will open all domes if not in paired_devices...?
                 self.open_observatory(paired_devices)
@@ -1766,11 +1708,7 @@ class Observatory:
                     self.wait_for_slew(paired_devices)
 
         # set filter
-        if (
-            "filter" in action_value
-            and "FilterWheel" in paired_devices
-            and self.error_free
-        ):
+        if "filter" in action_value and "FilterWheel" in paired_devices and self.error_free:
             # get filter name
             f = action_value["filter"]
             if isinstance(f, list):
@@ -1844,9 +1782,7 @@ class Observatory:
 
         """
 
-        base_conditions = (
-            self.error_free and self.schedule_running and self.watchdog_running
-        )
+        base_conditions = self.error_free and self.schedule_running and self.watchdog_running
 
         if row is None:
             return base_conditions and self.weather_safe
@@ -2080,9 +2016,7 @@ class Observatory:
                             hdul.flush()
 
                     if pointing_complete is False:
-                        wcs_solve = (
-                            None  # to not contaminate the next image if pointing fails
-                        )
+                        wcs_solve = None  # to not contaminate the next image if pointing fails
 
                     if pointing_attempts > 3 and pointing_complete is False:
                         self.logger.warning(
@@ -2094,14 +2028,8 @@ class Observatory:
                     pointing_complete = True
 
                 # initialise guiding once pointing correction is complete
-                if (
-                    action_value.get("guiding")
-                    and guiding is False
-                    and pointing_complete is True
-                ):
-                    guiding = self.start_guider(
-                        row, action_value, folder, paired_devices
-                    )
+                if action_value.get("guiding") and guiding is False and pointing_complete is True:
+                    guiding = self.start_guider(row, action_value, folder, paired_devices)
 
         # stop guiding at end of sequence
         if action_value.get("guiding"):
@@ -2123,9 +2051,7 @@ class Observatory:
             f"starting {row['start_time']} and ending {row['end_time']}"
         )
 
-        action_value, folder, hdr = self.pre_sequence(
-            row, paired_devices, create_folder=False
-        )
+        action_value, folder, hdr = self.pre_sequence(row, paired_devices, create_folder=False)
 
         action_value["object"] = "pointing_model"
 
@@ -2147,9 +2073,7 @@ class Observatory:
         obs_lat = hdr["LAT-OBS"]
         obs_lon = hdr["LONG-OBS"]
         obs_alt = hdr["ALT-OBS"]
-        obs_location = EarthLocation(
-            lat=obs_lat * u.deg, lon=obs_lon * u.deg, height=obs_alt * u.m
-        )
+        obs_location = EarthLocation(lat=obs_lat * u.deg, lon=obs_lon * u.deg, height=obs_alt * u.m)
         MOON_LIMIT = 20 * u.deg  # pointing distance to the moon in degrees
 
         # Generate points (spiral from zenith to 30 deg above horizon)
@@ -2172,9 +2096,7 @@ class Observatory:
 
             # Get current moon position
             observing_time = Time(datetime.now(UTC))
-            moon_altaz = get_body(
-                "moon", observing_time
-            ).transform_to(  # Alternative method
+            moon_altaz = get_body("moon", observing_time).transform_to(  # Alternative method
                 AltAz(obstime=observing_time, location=obs_location)
             )
 
@@ -2271,9 +2193,7 @@ class Observatory:
         ][0]
 
         # convert to degrees
-        pointing_threshold = (
-            self.config["Telescope"][tel_index]["pointing_threshold"] / 60
-        )
+        pointing_threshold = self.config["Telescope"][tel_index]["pointing_threshold"] / 60
 
         if slew is False:
             pointing_threshold = 0
@@ -2409,14 +2329,12 @@ class Observatory:
                 height=hdr["ALT-OBS"] * u.m,
             )
         except Exception as e:
-            raise ValueError("Error determining observatory location: {str(e)}.")
+            raise ValueError(f"Error determining observatory location: {str(e)}.")
 
         # Determine autofocus calibration_field
         try:
-            if "gaia_tmass_db_path" not in action_value:
-                raise ValueError(
-                    "gaia_tmass_db_path not found among the action values."
-                )
+            if not CONFIG.gaia_db.exists() or not action_value.get("use_gaia", True):
+                raise ValueError("gaia_tmass_db_path not specified in config.")
 
             # Deremine maximimal zenith angle
             maximal_zenith_angle = action_value.get("maximal_zenith_angle", None)
@@ -2432,17 +2350,15 @@ class Observatory:
             self.logger.info(
                 f"Computing coordinates for the autofocus target with maximal zenith angle of "
                 f"{maximal_zenith_angle}."
-                f"and selection method '{selection_method}'."
+                # f"and selection method '{selection_method}'."
             )
 
             # Pointing the telescope
-            zenith_neighbourhood_query = (
-                ZenithNeighbourhoodQuery.create_from_location_and_angle(
-                    db_path=action_value["gaia_tmass_db_path"],
-                    observatory_location=observatory_location,
-                    observation_time=action_value.get("observation_time", None),
-                    maximal_zenith_angle=maximal_zenith_angle,
-                )
+            zenith_neighbourhood_query = ZenithNeighbourhoodQuery.create_from_location_and_angle(
+                db_path=str(CONFIG.gaia_db),  # action_value["gaia_tmass_db_path"],
+                observatory_location=observatory_location,
+                observation_time=action_value.get("observation_time", None),
+                maximal_zenith_angle=maximal_zenith_angle,
             )
 
             self.logger.info(
@@ -2483,26 +2399,18 @@ class Observatory:
             selection_method = action_value.get("selection_method", "single")
             # Select star
             if selection_method == "single":
-                centre_coordinates = znqr.get_sky_coord_of_select_star(
-                    np.argmax(znqr.n == 1)
-                )
+                centre_coordinates = znqr.get_sky_coord_of_select_star(np.argmax(znqr.n == 1))
             elif selection_method == "maximal":
-                centre_coordinates = znqr.get_sky_coord_of_select_star(
-                    np.argmax(znqr.n)
-                )
+                centre_coordinates = znqr.get_sky_coord_of_select_star(np.argmax(znqr.n))
             elif selection_method == "any":
                 centre_coordinates = znqr.get_sky_coord_of_select_star(0)
             else:
                 self.logger.warning(
                     f"Unknown selection_method: {selection_method}. Fall back to 'single'."
                 )
-                centre_coordinates = znqr.get_sky_coord_of_select_star(
-                    np.argmax(znqr.n == 1)
-                )
+                centre_coordinates = znqr.get_sky_coord_of_select_star(np.argmax(znqr.n == 1))
 
-            if centre_coordinates is None or not isinstance(
-                centre_coordinates, SkyCoord
-            ):
+            if centre_coordinates is None or not isinstance(centre_coordinates, SkyCoord):
                 raise ValueError("No suitable calibration field found.")
 
         except Exception as e:
@@ -2551,8 +2459,7 @@ class Observatory:
             focus_measure_operator = action_value.get("focus_measure_operator", "HFR")
             if not isinstance(focus_measure_operator, str):
                 self.logger.warning(
-                    f"Invalid focus_measure_operator: {focus_measure_operator}."
-                    " Using HFR."
+                    f"Invalid focus_measure_operator: {focus_measure_operator}." " Using HFR."
                 )
                 focus_measure_operator = astrasfmo.HFRStarFocusMeasure
 
@@ -2573,8 +2480,7 @@ class Observatory:
                 focus_measure_operator = astrafmo.NormalizedVarianceFocusMeasure
             else:
                 self.logger.warning(
-                    f"Unknown focus_measure_operator: {focus_measure_operator}."
-                    " Using HFR."
+                    f"Unknown focus_measure_operator: {focus_measure_operator}." " Using HFR."
                 )
                 focus_measure_operator = astrasfmo.HFRStarFocusMeasure
             return focus_measure_operator
@@ -2586,8 +2492,7 @@ class Observatory:
             extremum_estimator = action_value.get("extremum_estimator", "LOWESS")
             if not isinstance(extremum_estimator, str):
                 self.logger.warning(
-                    f"Unknown extremum_estimator: {extremum_estimator}."
-                    " Using LOWESS.",
+                    f"Unknown extremum_estimator: {extremum_estimator}." " Using LOWESS.",
                 )
 
             if extremum_estimator.lower() in ["lowess", "loess"]:
@@ -2595,9 +2500,7 @@ class Observatory:
                     frac=action_value.get("frac", 0.4), it=action_value.get("it", 5)
                 )
             elif extremum_estimator.lower() in ["medianfilter", "medfil", "median"]:
-                astrafee.MedianFilterExtremumEstimation(
-                    size=action_value.get("size", 5)
-                )
+                astrafee.MedianFilterExtremumEstimation(size=action_value.get("size", 5))
             elif extremum_estimator.lower() in ["spline"]:
                 astrafee.SplineExtremumEstimator(k=action_value.get("k", 3))
             elif extremum_estimator.lower() in ["rbf"]:
@@ -2607,8 +2510,7 @@ class Observatory:
                 )
             else:
                 self.logger.warning(
-                    f"Unknown extremum_estimator: {extremum_estimator}."
-                    " Using LOWESS.",
+                    f"Unknown extremum_estimator: {extremum_estimator}." " Using LOWESS.",
                 )
                 extremum_estimator = astrafee.LOWESSExtremumEstimator(
                     frac=action_value.get("frac", 0.4), it=action_value.get("it", 5)
@@ -2672,9 +2574,7 @@ class Observatory:
                 row, action_value, hdr
             )
         except Exception as e:
-            self.logger.error(
-                f"Error determining autofocus calibration field: {str(e)}."
-            )
+            self.logger.error(f"Error determining autofocus calibration field: {str(e)}.")
             self.error_source.append(
                 {
                     "device_type": "Autofocuser",
@@ -2697,9 +2597,7 @@ class Observatory:
                     "error": str(e),
                 }
             )
-            self.logger.error(
-                f"Error slewing to autofocus calibration field: {str(e)}."
-            )
+            self.logger.error(f"Error slewing to autofocus calibration field: {str(e)}.")
             return False
 
         # Perform autofocus
@@ -2742,9 +2640,7 @@ class Observatory:
                     "NormalisedVariance": astrafmo.NormalizedVarianceFocusMeasure(),
                     "Tennegrad": astrafmo.TenengradFocusMeasure(),
                 },
-                focus_measure_operator_kwargs={
-                    "star_find_threshold": 2
-                },  # Todo needed?
+                focus_measure_operator_kwargs={"star_find_threshold": 2},  # Todo needed?
                 keep_images=True,
             )
             self.logger.debug(f"Autofocus arguments: {autofocus_args}")
@@ -2830,12 +2726,8 @@ class Observatory:
         cam_index = self.get_cam_index(row["device_name"])
         target_adu = self.config["Camera"][cam_index]["flats"]["target_adu"]
         offset = self.config["Camera"][cam_index]["flats"]["bias_offset"]
-        lower_exptime_limit = self.config["Camera"][cam_index]["flats"][
-            "lower_exptime_limit"
-        ]
-        upper_exptime_limit = self.config["Camera"][cam_index]["flats"][
-            "upper_exptime_limit"
-        ]
+        lower_exptime_limit = self.config["Camera"][cam_index]["flats"]["lower_exptime_limit"]
+        upper_exptime_limit = self.config["Camera"][cam_index]["flats"]["upper_exptime_limit"]
 
         # camera max adu
         maxadu = camera.get("MaxADU")
@@ -2850,9 +2742,7 @@ class Observatory:
         obs_lat = hdr["LAT-OBS"]
         obs_lon = hdr["LONG-OBS"]
         obs_alt = hdr["ALT-OBS"]
-        obs_location = EarthLocation(
-            lat=obs_lat * u.deg, lon=obs_lon * u.deg, height=obs_alt * u.m
-        )
+        obs_location = EarthLocation(lat=obs_lat * u.deg, lon=obs_lon * u.deg, height=obs_alt * u.m)
 
         # wait for sun to be in right position
         sun_rising, take_flats, sun_altaz = utils.is_sun_rising(obs_location)
@@ -2898,9 +2788,7 @@ class Observatory:
             if self.check_conditions(row) and take_flats:
                 ## initial setup + exposure setting
                 # sets filter (and focus, soon...)
-                self.setup_observatory(
-                    paired_devices, action_value, filter_list_index=i
-                )
+                self.setup_observatory(paired_devices, action_value, filter_list_index=i)
 
                 # opens dome and move telescope to flat position
                 self.flats_position(obs_location, paired_devices, row)
@@ -2964,10 +2852,7 @@ class Observatory:
                             ):
                                 exptime = exptime / fraction
 
-                                if (
-                                    exptime < lower_exptime_limit
-                                    or exptime > upper_exptime_limit
-                                ):
+                                if exptime < lower_exptime_limit or exptime > upper_exptime_limit:
                                     self.logger.warning(
                                         f"Exposure time of {exptime:.3f} s out of user defined range of {lower_exptime_limit} s to {upper_exptime_limit} s"
                                     )
@@ -2994,9 +2879,7 @@ class Observatory:
             f"Flat sequence ended for {row['device_name']}, starting {row['start_time']} and ending {row['end_time']}"
         )
 
-    def flats_position(
-        self, obs_location: EarthLocation, paired_devices: dict, row: dict
-    ) -> None:
+    def flats_position(self, obs_location: EarthLocation, paired_devices: dict, row: dict) -> None:
         """
         Move a telescope to a optimal sky flat position for capturing flat frames.
 
@@ -3121,23 +3004,17 @@ class Observatory:
             getting_exptime = True
             while self.check_conditions(row) and getting_exptime:
                 r = camera.get("ImageReady")
-                time.sleep(
-                    0.1
-                )  # add 0.1 s sleep to avoid spamming the camera and high cpu usage
+                time.sleep(0.1)  # add 0.1 s sleep to avoid spamming the camera and high cpu usage
                 time.sleep(0)  # yield to other threads
                 if r is True:
                     arr = camera.get("ImageArray")
                     median_adu = np.nanmedian(arr)
                     fraction = (median_adu - offset) / (target_adu[0] - offset)
 
-                    sun_rising, take_flats, sun_altaz = utils.is_sun_rising(
-                        obs_location
-                    )
+                    sun_rising, take_flats, sun_altaz = utils.is_sun_rising(obs_location)
 
                     if (
-                        math.isclose(
-                            target_adu[0], median_adu, rel_tol=0, abs_tol=target_adu[1]
-                        )
+                        math.isclose(target_adu[0], median_adu, rel_tol=0, abs_tol=target_adu[1])
                         is False
                         and take_flats is True
                     ):
@@ -3156,9 +3033,7 @@ class Observatory:
                                 self.logger.info(
                                     f"Exposing full frame of {paired_devices['Camera']} for exposure time {exptime}s"
                                 )
-                                camera.get(
-                                    "StartExposure", Duration=exptime, Light=True
-                                )
+                                camera.get("StartExposure", Duration=exptime, Light=True)
                             else:
                                 self.logger.info(
                                     f"Sun is setting. Sun at {sun_altaz.alt.degree:.2f} degrees."
@@ -3179,9 +3054,7 @@ class Observatory:
                                 self.logger.info(
                                     f"Exposing full frame of {paired_devices['Camera']} for exposure time {exptime}s"
                                 )
-                                camera.get(
-                                    "StartExposure", Duration=exptime, Light=True
-                                )
+                                camera.get("StartExposure", Duration=exptime, Light=True)
                             else:
                                 self.logger.info(
                                     f"Sun is rising. Sun at {sun_altaz.alt.degree:.2f} degrees."
@@ -3233,9 +3106,7 @@ class Observatory:
             int: The index of the camera device in the configuration file.
 
         """
-        cam_index = [
-            i for i, d in enumerate(self.config["Camera"]) if d["device_name"] == cam
-        ][0]
+        cam_index = [i for i, d in enumerate(self.config["Camera"]) if d["device_name"] == cam][0]
         return cam_index
 
     def base_header(self, paired_devices: dict, action_value: dict) -> fits.Header:
@@ -3298,8 +3169,7 @@ class Observatory:
                     self.logger.warning(f"Unknown header: {row['header']}")
 
             elif (
-                row["device_type"]
-                not in ["astropy_default", "astra", "astra_fixed", ""]
+                row["device_type"] not in ["astropy_default", "astra", "astra_fixed", ""]
             ) and row["fixed"] is True:
                 # direct ascom command headers
                 device_type = row["device_type"]
@@ -3400,9 +3270,9 @@ class Observatory:
                     df_images_filt["date_obs"] = pd.to_datetime(
                         df_images_filt["date_obs"], format="%Y-%m-%d %H:%M:%S.%f"
                     )
-                    df_images_filt = df_images_filt.sort_values(
-                        by="date_obs"
-                    ).reset_index(drop=True)
+                    df_images_filt = df_images_filt.sort_values(by="date_obs").reset_index(
+                        drop=True
+                    )
                     df_images_filt["jd_obs"] = (
                         df_images_filt["date_obs"].apply(utils.to_jd).sort_values()
                     )
@@ -3414,17 +3284,13 @@ class Observatory:
                             df_images_filt["jd_obs"] + 1e-9,
                         )
 
-                    df_images_filt = df_images_filt.sort_values(
-                        by="jd_obs"
-                    ).reset_index()
+                    df_images_filt = df_images_filt.sort_values(by="jd_obs").reset_index()
 
                     # get polled data from ascom devices +- 10 seconds of first and last image
-                    t0 = pd.to_datetime(
-                        df_images_filt["date_obs"].iloc[0]
-                    ) - pd.Timedelta("10 sec")
-                    t1 = pd.to_datetime(
-                        df_images_filt["date_obs"].iloc[-1]
-                    ) + pd.Timedelta("10 sec")
+                    t0 = pd.to_datetime(df_images_filt["date_obs"].iloc[0]) - pd.Timedelta("10 sec")
+                    t1 = pd.to_datetime(df_images_filt["date_obs"].iloc[-1]) + pd.Timedelta(
+                        "10 sec"
+                    )
 
                     q = f"""SELECT * FROM polling WHERE datetime BETWEEN "{str(t0)}" AND "{str(t1)}";"""
                     rows = self.cursor.execute(q)
@@ -3450,14 +3316,8 @@ class Observatory:
                     # drop row that have device_type and device_command that are not in fits_config to avoid errors later
                     df_poll_unique = df_poll_unique[
                         df_poll_unique.apply(
-                            lambda x: (
-                                x["device_type"]
-                                in self.fits_config["device_type"].values
-                            )
-                            and (
-                                x["device_command"]
-                                in self.fits_config["device_command"].values
-                            ),
+                            lambda x: (x["device_type"] in self.fits_config["device_type"].values)
+                            and (x["device_command"] in self.fits_config["device_command"].values),
                             axis=1,
                         )
                     ]
@@ -3467,10 +3327,7 @@ class Observatory:
                         lambda x: (
                             self.fits_config[
                                 (self.fits_config["device_type"] == x["device_type"])
-                                & (
-                                    self.fits_config["device_command"]
-                                    == x["device_command"]
-                                )
+                                & (self.fits_config["device_command"] == x["device_command"])
                             ]["header"].values[0]
                         ),
                         axis=1,
@@ -3479,10 +3336,7 @@ class Observatory:
                         lambda x: (
                             self.fits_config[
                                 (self.fits_config["device_type"] == x["device_type"])
-                                & (
-                                    self.fits_config["device_command"]
-                                    == x["device_command"]
-                                )
+                                & (self.fits_config["device_command"] == x["device_command"])
                             ]["comment"].values[0]
                         ),
                         axis=1,
@@ -3552,9 +3406,7 @@ class Observatory:
             self.logger.info("Completing headers... Done.")
 
         except Exception as e:
-            self.error_source.append(
-                {"device_type": "Headers", "device_name": "", "error": str(e)}
-            )
+            self.error_source.append({"device_type": "Headers", "device_name": "", "error": str(e)})
             self.logger.error(f"Error completing headers: {e}")
 
     def monitor_action(
@@ -3600,7 +3452,9 @@ class Observatory:
         )
 
         # create unique key for monitor action and add to queue for device_name
-        unique_key = f"{device_type}{monitor_command}{desired_condition}{run_command}{run_command_type}"
+        unique_key = (
+            f"{device_type}{monitor_command}{desired_condition}{run_command}{run_command_type}"
+        )
         self.monitor_action_queue[device_name][unique_key] = start_time
 
         try:
