@@ -2640,13 +2640,12 @@ class Observatory:
                     "NormalisedVariance": astrafmo.NormalizedVarianceFocusMeasure(),
                     "Tennegrad": astrafmo.TenengradFocusMeasure(),
                 },
-                focus_measure_operator_kwargs={"star_find_threshold": 2},  # Todo needed?
+                focus_measure_operator_kwargs={
+                    "star_find_threshold": action_value.get("star_find_threshold", 5.0)
+                },  # TODO automate
                 keep_images=True,
             )
             self.logger.debug(f"Autofocus arguments: {autofocus_args}")
-
-            # TODO Remove Warmup
-            # _ = autofocus_device_manager.camera.perform_exposure(texp=5)
 
             if issubclass(focus_measure_operator, astrasfmo.StarSizeFocusMeasure):
                 autofocuser = AnalyticResponseAutofocuser(
