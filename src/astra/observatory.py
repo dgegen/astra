@@ -1525,7 +1525,7 @@ class Observatory:
                 self.final_headers()
 
             elif "autofocus" == row["action_type"]:
-                self.autofocus(row, paired_devices)
+                self.autofocus_sequence(row, paired_devices)
 
             else:
                 self.error_source.append(
@@ -2439,7 +2439,7 @@ class Observatory:
 
         return centre_coordinates
 
-    def autofocus(self, row, paired_devices) -> bool:
+    def autofocus_sequence(self, row, paired_devices) -> bool:
         """
         Perform autofocus.
 
@@ -2642,7 +2642,7 @@ class Observatory:
                 },
                 focus_measure_operator_kwargs={
                     "star_find_threshold": action_value.get("star_find_threshold", 5.0)
-                },  # TODO automate
+                },
                 keep_images=True,
             )
             self.logger.debug(f"Autofocus arguments: {autofocus_args}")
