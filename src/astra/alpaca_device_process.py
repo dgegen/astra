@@ -520,10 +520,8 @@ class AlpacaDevice(Process):
             for _ in range(2):
                 try:
                     if data == "not get":
-                        data = getattr(self.device, method)
-
-                        if callable(data):
-                            data = data(**kwargs)
+                        attr = getattr(self.device, method)
+                        data = attr(**kwargs) if callable(attr) else attr
 
                         if self.debug:
                             self.queue.put(
@@ -562,10 +560,8 @@ class AlpacaDevice(Process):
 
             # final run. If error, caught by try/except
             if data == "not get":
-                data = getattr(self.device, method)
-
-                if callable(data):
-                    data = data(**kwargs)
+                attr = getattr(self.device, method)
+                data = attr(**kwargs) if callable(attr) else attr
 
                 if self.debug:
                     self.queue.put(
