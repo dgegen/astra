@@ -597,8 +597,8 @@ class Guider:
                     else:
                         y_p_dir = GuideDirections.guideWest
 
-            self.telescope.get("PulseGuide")(
-                Direction=y_p_dir, Duration=int(guide_time_y)
+            self.telescope.get(
+                "PulseGuide", Direction=y_p_dir, Duration=int(guide_time_y)
             )
 
         if pidy < 0 and pidy >= -CURRENT_MAX_SHIFT and self.running:
@@ -618,8 +618,8 @@ class Guider:
                     else:
                         y_n_dir = GuideDirections.guideWest
 
-            self.telescope.get("PulseGuide")(
-                Direction=y_n_dir, Duration=int(guide_time_y)
+            self.telescope.get(
+                "PulseGuide", Direction=y_n_dir, Duration=int(guide_time_y)
             )
 
         start_time = time.time()
@@ -648,8 +648,8 @@ class Guider:
                     else:
                         x_p_dir = GuideDirections.guideWest
 
-            self.telescope.get("PulseGuide")(
-                Direction=x_p_dir, Duration=int(guide_time_x)
+            self.telescope.get(
+                "PulseGuide", Direction=x_p_dir, Duration=int(guide_time_x)
             )
 
         if pidx < 0 and pidx >= -CURRENT_MAX_SHIFT and self.running:
@@ -669,8 +669,8 @@ class Guider:
                     else:
                         x_n_dir = GuideDirections.guideWest
 
-            self.telescope.get("PulseGuide")(
-                Direction=x_n_dir, Duration=int(guide_time_x)
+            self.telescope.get(
+                "PulseGuide", Direction=x_n_dir, Duration=int(guide_time_x)
             )
 
         start_time = time.time()
