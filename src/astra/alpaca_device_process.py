@@ -171,6 +171,9 @@ class AlpacaDevice(Process):
         connectable: bool = True,
         debug: bool = False,
     ) -> None:
+        if device_type not in ALPACA_DEVICE_TYPES:
+            raise ValueError(f"{device_type} is not a valid Alpaca device type")
+
         super().__init__()
         self.front_pipe, self.back_pipe = Pipe()
         self.lock = Lock()
@@ -386,24 +389,7 @@ class AlpacaDevice(Process):
 
         _ensure_60s_default_timeouts()
         _seed_client_ids()
-        if self.device_type in ALPACA_DEVICE_TYPES:
-            self.device = ALPACA_DEVICE_TYPES[self.device_type](
-                self.ip, self.device_number
-            )
-        else:
-            self.queue.put(
-                (
-                    self.metadata,
-                    {
-                        "type": "log",
-                        "data": (
-                            "warning",
-                            f"{self.device_type} is not a valid device type",
-                        ),
-                    },
-                )
-            )
-            return
+        self.device = ALPACA_DEVICE_TYPES[self.device_type](self.ip, self.device_number)
 
         self.queue.put(
             (
