@@ -45,7 +45,7 @@ dependencies = [
   "scipy",
   "twirl>=0.4.1",
   "sqlite3worker",
-  "alpyca @ git+https://github.com/ppp-one/alpyca.git",
+  "alpyca>=3.1.2,<4",
   "psutil",
   "donuts",
   "jinja2",

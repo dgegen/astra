@@ -2064,7 +2064,8 @@ class Observatory:
             filepath = None
             # if error_free is True, abort exposure
             if self.logger.error_free:
-                camera.get("AbortExposure")()  # check
+                # Executes in the camera subprocess
+                camera.get("AbortExposure")
         else:
             # get last exposure information
             exposure_start_datetime = pd.to_datetime(
@@ -3505,7 +3506,7 @@ class Observatory:
                         self.logger.info(log_message)
 
                     if run_command_type == "get":
-                        device.get(run_command, no_kwargs=True)
+                        device.get(run_command)
                     elif run_command_type == "set":
                         device.set(run_command, desired_condition)
 

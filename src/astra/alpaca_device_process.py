@@ -13,6 +13,7 @@ filter wheels, focusers, domes, and environmental monitoring equipment.
 """
 
 import os
+import random
 import signal
 import time
 from datetime import UTC, datetime
@@ -22,6 +23,7 @@ from threading import Thread
 from typing import Any, Dict, List, Optional, Union
 
 import requests
+from alpaca.device import Device
 from alpaca.camera import Camera
 from alpaca.covercalibrator import CoverCalibrator
 from alpaca.dome import Dome
@@ -32,6 +34,7 @@ from alpaca.rotator import Rotator
 from alpaca.safetymonitor import SafetyMonitor
 from alpaca.switch import Switch
 from alpaca.telescope import Telescope
+from functools import wraps
 
 ALPACA_DEVICE_TYPES = {
     "Telescope": Telescope,
@@ -45,6 +48,33 @@ ALPACA_DEVICE_TYPES = {
     "SafetyMonitor": SafetyMonitor,
     "Switch": Switch,
 }
+
+
+def _ensure_60s_default_timeouts() -> None:
+    if getattr(Device, "_astra_tmo_patched", False):
+        return
+
+    original_put = Device._put
+    original_get = Device._get
+
+    @wraps(original_put)
+    def _put_with_60sec_default(self, attribute, tmo: float = 60.0, **data):
+        return original_put(self, attribute, tmo=tmo, **data)
+
+    @wraps(original_get)
+    def _get_with_60sec_default(self, attribute, tmo: float = 60.0, **data):
+        return original_get(self, attribute, tmo=tmo, **data)
+
+    Device._put = _put_with_60sec_default
+    Device._get = _get_with_60sec_default
+    Device._astra_tmo_patched = True
+
+
+def _seed_client_ids() -> None:
+    pid_mask = os.getpid() & 0xFFFF
+    Device._client_id = random.randint(0, 0xFFFF) ^ pid_mask
+    Device._client_trans_id = random.randint(1, 0xFFFF)
+
 
 # https://medium.com/@sampsa.riikonen/doing-python-multiprocessing-the-right-way-a54c1880e300
 # https://stackoverflow.com/questions/27435284/multiprocessing-vs-multithreading-vs-asyncio
@@ -147,38 +177,6 @@ class AlpacaDevice(Process):
         self.queue = queue
         self.debug = debug
 
-        if device_type in [
-            "Telescope",
-            "Camera",
-            "CoverCalibrator",
-            "Dome",
-            "FilterWheel",
-            "Focuser",
-            "ObservingConditions",
-            "Rotator",
-            "SafetyMonitor",
-            "Switch",
-        ]:
-            self.device = ALPACA_DEVICE_TYPES[device_type](ip, device_number)
-        else:
-            self.queue.put(
-                (
-                    {
-                        "ip": ip,
-                        "device_type": device_type,
-                        "device_number": device_number,
-                        "device_name": device_name,
-                    },
-                    {
-                        "type": "log",
-                        "data": (
-                            "warning",
-                            f"{device_type} is not a valid device type",
-                        ),
-                    },
-                )
-            )
-
         self.ip = ip
         self.device_number = device_number
         self.device_type = device_type
@@ -203,6 +201,8 @@ class AlpacaDevice(Process):
         # when get/set operations hold the lock
         self._cached_poll_latest: Dict[str, Dict[str, Any]] = {}
 
+        self.device = None
+
         self.queue.put(
             (
                 self.metadata,
@@ -224,6 +224,10 @@ class AlpacaDevice(Process):
 
         Returns:
             Any: Result from the device method execution.
+
+        Note:
+            If the attribute is callable it is executed in the subprocess and the
+            result is returned.
 
         Raises:
             Exception: If the device method execution fails.
@@ -380,6 +384,27 @@ class AlpacaDevice(Process):
         # Create threading lock here because it cannot be pickled for subprocess spawning
         self._poll_lock = ThreadingLock()
 
+        _ensure_60s_default_timeouts()
+        _seed_client_ids()
+        if self.device_type in ALPACA_DEVICE_TYPES:
+            self.device = ALPACA_DEVICE_TYPES[self.device_type](
+                self.ip, self.device_number
+            )
+        else:
+            self.queue.put(
+                (
+                    self.metadata,
+                    {
+                        "type": "log",
+                        "data": (
+                            "warning",
+                            f"{self.device_type} is not a valid device type",
+                        ),
+                    },
+                )
+            )
+            return
+
         self.queue.put(
             (
                 self.metadata,
@@ -497,12 +522,8 @@ class AlpacaDevice(Process):
                     if data == "not get":
                         data = getattr(self.device, method)
 
-                        # if kwargs, call method with kwargs
-                        if kwargs:
-                            if "no_kwargs" in kwargs:
-                                data = data()
-                            else:
-                                data = data(**kwargs)
+                        if callable(data):
+                            data = data(**kwargs)
 
                         if self.debug:
                             self.queue.put(
@@ -543,12 +564,8 @@ class AlpacaDevice(Process):
             if data == "not get":
                 data = getattr(self.device, method)
 
-                # if kwargs, call method with kwargs
-                if kwargs:
-                    if "no_kwargs" in kwargs:
-                        data = data()
-                    else:
-                        data = data(**kwargs)
+                if callable(data):
+                    data = data(**kwargs)
 
                 if self.debug:
                     self.queue.put(
