@@ -354,7 +354,7 @@ class GuidingCalibrator:
             f"Pulse guiding {guide_direction.name} for {duration} ms"
         )
 
-        self._telescope.get("PulseGuide")(guide_direction, duration)
+        self._telescope.get("PulseGuide", Direction=guide_direction, Duration=duration)
         while self._telescope.get("IsPulseGuiding"):
             self.astra_observatory.logger.debug("Pulse guiding...")
             time.sleep(0.1)
