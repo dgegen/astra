@@ -127,7 +127,7 @@ class QueueManager:
                         self.logger.report_device_issue(
                             device_type=metadata["device_type"],
                             device_name=metadata["device_name"],
-                            message="Error for {metadata['device_name']}",
+                            message=f"Error for {metadata['device_name']}",
                             exception=r["data"][1],
                         )
                     elif r["data"][0] == "debug":
