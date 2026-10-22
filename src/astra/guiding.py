@@ -60,6 +60,9 @@ MAX_ERROR_PIXELS = 20
 # max alloed shift to correct during stabilisation
 MAX_ERROR_STABIL_PIXELS = 40
 
+# shifts > MAX_ERROR_PIXELS in a row before the field is stabilised again
+MAX_CULLED_IN_A_ROW = 3
+
 # IsPulseGuiding timeout
 IS_PULSE_GUIDING_TIMEOUT = 120  # seconds
 
@@ -203,7 +206,10 @@ class GuiderManager:
 
                 # Try to get field info from the most recent header
                 field = image_handler.header.get("OBJECT")
+                # stored without quotes by the guider loop, e.g. z' as z
                 filt = image_handler.header.get("FILTER")
+                if filt:
+                    filt = str(filt).strip("'")
                 exptime = str(image_handler.header.get("EXPTIME"))
                 pierside = paired_devices.telescope.get("SideOfPier")
 
@@ -463,11 +469,10 @@ class Guider:
             pre_pid_x, pre_pid_y, post_pid_x, post_pid_y, std_buff_x,
             std_buff_y, culled_max_shift_x, culled_max_shift_y)
             VALUES
-            ('%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s',
-            '%s', '%s', '%s', '%s', '%s', '%s', '%s')
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
 
-        self.database_manager.execute(qry % qry_args)
+        self.database_manager.execute(qry, qry_args)
 
     def logMessageToDb(self, camera_name: str, message: str) -> None:
         """
@@ -481,10 +486,10 @@ class Guider:
             INSERT INTO autoguider_info_log
             (camera, message)
             VALUES
-            ('%s', '%s')
+            (?, ?)
             """
         qry_args = (camera_name, message)
-        self.database_manager.execute(qry % qry_args)
+        self.database_manager.execute(qry, qry_args)
 
     def guide(
         self,
@@ -521,6 +526,14 @@ class Guider:
                 - pidx, pidy (float): Actual corrections sent to mount
                 - sigma_x, sigma_y (float): Buffer standard deviations
         """
+
+        if not (np.isfinite(x) and np.isfinite(y)):
+            # a NaN would stay in the PID integrator and the buffer, and
+            # stop all later corrections
+            self.logMessageToDb(
+                camera_name, f"Shift not finite ({x}, {y}), applying no correction"
+            )
+            return False, 0.0, 0.0, 0.0, 0.0
 
         if self.ANGLE:
             # turn the shift from the camera axes into the mount axes
@@ -749,19 +762,27 @@ class Guider:
         qry = """
             SELECT ref_image
             FROM autoguider_ref
-            WHERE field = '%s'
-            AND filter = '%s'
-            AND exptime = '%s'
-            AND valid_from <= '%s'
-            AND camera = '%s'
-            AND pierside = %d
-            AND (valid_until IS NULL OR valid_until > '%s')
+            WHERE field = ?
+            AND filter = ?
+            AND exptime = ?
+            AND valid_from <= ?
+            AND camera = ?
+            AND pierside = ?
+            AND (valid_until IS NULL OR valid_until > ?)
             ORDER BY valid_from DESC
             LIMIT 1
             """
-        qry_args = (field, filt, exptime, tnow, camera, pierside, tnow)
+        qry_args = (
+            str(field),
+            str(filt),
+            str(exptime),
+            tnow,
+            camera,
+            int(pierside),
+            tnow,
+        )
 
-        result = self.database_manager.execute(qry % qry_args)
+        result = self.database_manager.execute(qry, qry_args)
 
         if not result:
             ref_image = None
@@ -799,16 +820,16 @@ class Guider:
         tnow = datetime.now(UTC).isoformat().split(".")[0].replace("T", " ")
         qry = """
             UPDATE autoguider_ref
-            SET valid_until = '%s'
-            WHERE field = '%s'
-            AND filter = '%s'
-            AND exptime = '%s'
-            AND camera = '%s'
-            AND pierside = %d
+            SET valid_until = ?
+            WHERE field = ?
+            AND filter = ?
+            AND exptime = ?
+            AND camera = ?
+            AND pierside = ?
             AND valid_until IS NULL
             """
-        qry_args = (tnow, field, filt, exptime, camera, pierside)
-        self.database_manager.execute(qry % qry_args)
+        qry_args = (tnow, str(field), str(filt), str(exptime), camera, int(pierside))
+        self.database_manager.execute(qry, qry_args)
         self.logMessageToDb(
             camera,
             f"Reference cleared for field={field}, filter={filt}, pierside={pierside}",
@@ -843,18 +864,18 @@ class Guider:
             (field, camera, ref_image,
             filter, exptime, valid_from, pierside)
             VALUES
-            ('%s', '%s', '%s', '%s', '%s', '%s', %d)
+            (?, ?, ?, ?, ?, ?, ?)
             """
         qry_args = (
-            field,
+            str(field),
             camera,
             os.path.split(ref_image)[-1],
-            filt,
-            exptime,
+            str(filt),
+            str(exptime),
             tnow,
-            pierside,
+            int(pierside),
         )
-        self.database_manager.execute(qry % qry_args)
+        self.database_manager.execute(qry, qry_args)
 
         # copy the file to the autoguider_ref location
         self.logger.info(f"Copying reference image {ref_image} to {self.reference_dir}")
@@ -1007,6 +1028,7 @@ class Guider:
 
                 images_to_stabilise = IMAGES_TO_STABILISE
                 stabilised = "n"
+                culled_in_a_row = 0
 
                 # Main guiding loop
                 while self.running:
@@ -1037,6 +1059,40 @@ class Guider:
                             camera_name,
                             f"REF: {ref_file} CHECK: {check_file} [{current_filter}]",
                         )
+                        # Load comparison image and measure shift
+                        try:
+                            h2 = fits.open(check_file)
+                            del h2
+                        except IOError:
+                            self.logMessageToDb(
+                                camera_name,
+                                f"Problem opening CHECK: {check_file}...",
+                            )
+                            self.logMessageToDb(
+                                camera_name, "Breaking back to look for new file..."
+                            )
+                            continue
+
+                        # work out shift here
+                        shift = donuts_ref.measure_shift(check_file)
+                        shift_x = shift.x.value  # type: ignore
+                        shift_y = shift.y.value  # type: ignore
+                        self.logMessageToDb(
+                            camera_name, f"x shift: {float(shift_x):.2f}"
+                        )
+                        self.logMessageToDb(
+                            camera_name, f"y shift: {float(shift_y):.2f}"
+                        )
+
+                        # Donuts gives NaN when too few stars are left after
+                        # cleaning, skip the image before it counts
+                        if not (np.isfinite(shift_x) and np.isfinite(shift_y)):
+                            self.logger.warning(
+                                f"Guider could not measure a shift on {os.path.basename(check_file)}, "
+                                "too few stars? Skipping image."
+                            )
+                            continue
+
                         images_to_stabilise -= 1
                         # PID reset logic
                         if images_to_stabilise == 0:
@@ -1056,34 +1112,10 @@ class Guider:
                             self.PIDy = PID(1.0, 0.0, 0.0)
                             self.PIDx.initialize_set_point(self.PID_COEFFS["set_x"])
                             self.PIDy.initialize_set_point(self.PID_COEFFS["set_y"])
-                        # Load comparison image and measure shift
-                        try:
-                            h2 = fits.open(check_file)
-                            del h2
-                        except IOError:
-                            self.logMessageToDb(
-                                camera_name,
-                                f"Problem opening CHECK: {check_file}...",
-                            )
-                            self.logMessageToDb(
-                                camera_name, "Breaking back to look for new file..."
-                            )
-                            continue
 
                         # reset culled tags
                         culled_max_shift_x = "n"
                         culled_max_shift_y = "n"
-
-                        # work out shift here
-                        shift = donuts_ref.measure_shift(check_file)
-                        shift_x = shift.x.value  # type: ignore
-                        shift_y = shift.y.value  # type: ignore
-                        self.logMessageToDb(
-                            camera_name, f"x shift: {float(shift_x):.2f}"
-                        )
-                        self.logMessageToDb(
-                            camera_name, f"y shift: {float(shift_y):.2f}"
-                        )
 
                         # revoke stabilisation early if shift less than 2 pixels
                         if (
@@ -1132,8 +1164,8 @@ class Guider:
                             else:
                                 pre_pid_y = shift_y
 
-                        # if either axis is off by > MAX error then stop everything, no point guiding
-                        # in 1 axis, need to figure out the source of the problem and run again
+                        # if either axis is off by > MAX error then apply no correction, no point
+                        # guiding in 1 axis
                         if culled_max_shift_x == "y" or culled_max_shift_y == "y":
                             (
                                 pre_pid_x,
@@ -1143,7 +1175,20 @@ class Guider:
                                 std_buff_x,
                                 std_buff_y,
                             ) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+                            # the field has moved too far to guide, pull it back
+                            # to the reference with the wider stabilisation limit
+                            culled_in_a_row += 1
+                            if culled_in_a_row >= MAX_CULLED_IN_A_ROW:
+                                self.logger.warning(
+                                    f"Guider shift > {MAX_ERROR_PIXELS} pixels for "
+                                    f"{culled_in_a_row} images in a row "
+                                    f"({shift_x:.1f}, {shift_y:.1f}), stabilising field again"
+                                )
+                                images_to_stabilise = IMAGES_TO_STABILISE
+                                culled_in_a_row = 0
                         else:
+                            culled_in_a_row = 0
                             if self.running:
                                 (
                                     applied,
