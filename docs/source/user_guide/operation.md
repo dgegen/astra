@@ -64,14 +64,14 @@ Run the [autofocus action](scheduling.md#autofocus-action). Ensure the `filter` 
 }
 ```
 
-Upon successful completion, the optimized focus position is updated in the configuration. Autofocus images and V-curve plot are saved to the `images/autofocus` directory.
+Upon successful completion, the optimized focus position is updated in the configuration. Autofocus images and V-curve plot are saved to the `images/autofocus` directory. If the focus curve is flat, or fewer than 5 focus positions could be measured (e.g. too few or too faint stars in the field), the run fails: the focuser goes back to its start position and the previous best focus position is kept.
 
 ```{admonition} Focusing Tip
 :class: tip
 
 **Coarse Search (e.g., `fft`):** Best for broad ranges where stars appear as blurry "donuts." These non-parametric operators measure overall frame sharpness without needing to identify individual stars, making them nearly impossible to "confuse" with distorted optics.
 
-**Fine Tuning (e.g., `HFR`):** Best for precision near the focus peak. These algorithms fit a "V-curve" to the diameters of detected stars. They provide great accuracy once stars are point-like, but will fail during wide searches if the stars are too bloated to be recognized by the star-finder.
+**Fine Tuning (e.g., `HFR`):** Best for precision near the focus peak. These algorithms fit a "V-curve" to the sizes of detected stars (for `HFR`, the half flux radius in pixels). They provide great accuracy once stars are point-like, but will fail during wide searches if the stars are too bloated to be recognized by the star-finder.
 ```
 
 <!-- **3. Optional: Pointing model**
