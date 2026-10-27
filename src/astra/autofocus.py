@@ -209,24 +209,45 @@ class AstraFocuser(FocuserInterface):
         super().__init__(current_position=current_position, allowed_range=allowed_range)
 
     def move_focuser_to_position(
-        self, new_position: int, hard_timeout: float = 120
+        self, new_position: int, hard_timeout: float = 120, start_timeout: float = 5
     ) -> None:
         """Move focuser to specified position with timeout protection.
 
         Moves the focuser to the target position and waits for completion.
         Includes range checking and timeout protection.
 
+        Some drivers still report ``IsMoving`` as False just after ``Move``, before
+        the motor has started. So the move only counts as started once the focuser
+        is moving or has left its old position, and only then as finished when it
+        stops moving. A warning is logged if the focuser does not start within
+        ``start_timeout`` or does not end at the target position.
+
         Args:
             new_position (int): Target focuser position.
             hard_timeout (float): Maximum time to wait for movement in seconds.
+            start_timeout (float): Maximum time to wait for the movement to start
+                in seconds.
 
         Raises:
             TimeoutError: If movement takes longer than hard_timeout.
         """
         new_position = self._project_to_allowed_range(new_position)
+        old_position = self.get_current_position()
 
         self.alpaca_device_focuser.get("Move", Position=new_position)
         start_time = time.time()
+        while new_position != old_position and not (
+            self.alpaca_device_focuser.get("IsMoving")
+            or self.get_current_position() != old_position
+        ):
+            if time.time() - start_time > start_timeout:
+                self.observatory.logger.warning(
+                    f"Focuser did not start moving from {old_position} to "
+                    f"{new_position} within {start_timeout} s."
+                )
+                break
+            time.sleep(0.1)
+
         while self.alpaca_device_focuser.get("IsMoving"):
             if time.time() - start_time > hard_timeout:
                 raise TimeoutError("Slew timeout")
@@ -234,6 +255,13 @@ class AstraFocuser(FocuserInterface):
                 break
 
             time.sleep(0.1)
+
+        position = self.get_current_position()
+        if position != new_position:
+            self.observatory.logger.warning(
+                f"Focuser is at {position} after moving, not at the requested "
+                f"{new_position}."
+            )
 
         time.sleep(self.settle_time)
         return None
