@@ -223,7 +223,9 @@ class AstraFocuser(FocuserInterface):
 
         Some drivers still report ``IsMoving`` as False just after ``Move``, before
         the motor has started. So the move only counts as started once the focuser
-        is moving or has left its old position, and only then as finished when it
+        is moving or more than ``focus_tolerance`` steps from its old position,
+        so that a jittering position reading does not count as a start, and only
+        then as finished when it
         stops moving. A warning is logged if the focuser does not start within
         ``start_timeout`` or ends more than ``focus_tolerance`` steps from the
         target position. A move within ``focus_tolerance`` steps of the old
@@ -246,7 +248,7 @@ class AstraFocuser(FocuserInterface):
         start_time = time.time()
         while abs(new_position - old_position) > self.focus_tolerance and not (
             self.alpaca_device_focuser.get("IsMoving")
-            or self.get_current_position() != old_position
+            or abs(self.get_current_position() - old_position) > self.focus_tolerance
         ):
             if time.time() - start_time > start_timeout:
                 self.observatory.logger.warning(

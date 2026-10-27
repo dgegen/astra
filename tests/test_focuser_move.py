@@ -1,18 +1,22 @@
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
 import astra.autofocus
 from astra.autofocus import AstraAutofocusDeviceManager, AstraFocuser
+from astra.observatory import Observatory
 
 
 class FakeFocuser:
     """Starts moving only after `delay` polls, as drivers that report IsMoving late."""
 
-    def __init__(self, position=7000, delay=3, duration=5, stuck=False, error=0):
+    def __init__(
+        self, position=7000, delay=3, duration=5, stuck=False, error=0, jitter=0
+    ):
         self.position = position
         self.delay, self.duration, self.stuck = delay, duration, stuck
-        self.error = error
+        self.error, self.jitter = error, jitter
         self.target = None
         self.polls = 0
 
@@ -35,7 +39,7 @@ class FakeFocuser:
                 self.position = self.target + self.error
             return moving and not self.stuck
         if name == "Position":
-            return self.position
+            return self.position + (self.jitter if self.polls % 2 else 0)
         raise AssertionError(name)
 
 
@@ -95,6 +99,14 @@ def test_does_not_warn_if_the_focuser_ends_within_the_tolerance():
     observatory.logger.warning.assert_not_called()
 
 
+def test_position_jitter_within_the_tolerance_is_not_a_start():
+    device = FakeFocuser(jitter=1)
+    focuser, observatory = make_focuser(device, focus_tolerance=2)
+    focuser.move_focuser_to_position(8000)
+    assert device.position == 8000
+    observatory.logger.warning.assert_not_called()
+
+
 def test_small_move_within_the_tolerance_does_not_wait():
     device = FakeFocuser(stuck=True)
     focuser, observatory = make_focuser(device, focus_tolerance=2)
@@ -124,3 +136,26 @@ def test_waits_settle_factor_exposures_after_a_move(
     manager.perform_exposure_at(focus_position=8000, texp=4.0)
     assert focuser.get_current_position() == 8000
     assert events[-2:] == [expected, "exposure"]
+
+
+class FakePairedDevices:
+    camera_name = "camera"
+
+    def __init__(self, configs):
+        self.configs = configs
+
+    def __contains__(self, device_type):
+        return device_type in self.configs
+
+    def get_device_config(self, device_type):
+        return self.configs[device_type]
+
+
+def test_telescope_settle_factor_warns_once_per_camera():
+    observatory = SimpleNamespace(logger=MagicMock(), _settle_factor_warned=set())
+    paired_devices = FakePairedDevices(
+        {"Camera": {}, "Telescope": {"settle_factor": 1.0}}
+    )
+    for _ in range(3):
+        assert Observatory.get_settle_factor(observatory, paired_devices) == 1.0
+    observatory.logger.warning.assert_called_once()

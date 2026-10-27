@@ -226,6 +226,9 @@ class Observatory:
         # running threads list
         self.thread_manager = ThreadManager()
 
+        # Cameras whose telescope settle_factor deprecation warning was logged.
+        self._settle_factor_warned: set[str] = set()
+
         # Per-telescope cache: can the mount set differential tracking rates?
         # Filled on first use by _clear_tracking_rate_offsets.
         self._rate_offset_support: dict[str, bool] = {}
@@ -2719,7 +2722,7 @@ class Observatory:
         that started before a slew or focus move ended. So Astra waits
         ``settle_factor * exptime`` after such a move. The value comes from the
         camera config. An old config that sets it on the telescope still works,
-        with a warning.
+        with a warning that is logged once per camera.
 
         Args:
             paired_devices (PairedDevices): Devices paired with the camera.
@@ -2733,11 +2736,14 @@ class Observatory:
 
         if "Telescope" in paired_devices:
             telescope_config = paired_devices.get_device_config("Telescope")
+            camera_name = paired_devices.camera_name
             if "settle_factor" in telescope_config:
-                self.logger.warning(
-                    "settle_factor in the Telescope config is deprecated. "
-                    f"Move it to the config of camera {paired_devices.camera_name}."
-                )
+                if camera_name not in self._settle_factor_warned:
+                    self._settle_factor_warned.add(camera_name)
+                    self.logger.warning(
+                        "settle_factor in the Telescope config is deprecated. "
+                        f"Move it to the config of camera {camera_name}."
+                    )
                 return telescope_config["settle_factor"]
 
         return 0.0
