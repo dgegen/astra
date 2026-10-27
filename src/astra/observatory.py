@@ -2712,6 +2712,36 @@ class Observatory:
         if self.check_conditions(action):
             nonsidereal.apply_rates(paired_devices.telescope)
 
+    def get_settle_factor(self, paired_devices: PairedDevices) -> float:
+        """Get the camera settle factor, in exposure times.
+
+        Cameras that capture continuously, such as SPIRIT, can return a frame
+        that started before a slew or focus move ended. So Astra waits
+        ``settle_factor * exptime`` after such a move. The value comes from the
+        camera config. An old config that sets it on the telescope still works,
+        with a warning.
+
+        Args:
+            paired_devices (PairedDevices): Devices paired with the camera.
+
+        Returns:
+            float: Settle factor. 0.0 if no config sets it.
+        """
+        camera_config = paired_devices.get_device_config("Camera")
+        if "settle_factor" in camera_config:
+            return camera_config["settle_factor"]
+
+        if "Telescope" in paired_devices:
+            telescope_config = paired_devices.get_device_config("Telescope")
+            if "settle_factor" in telescope_config:
+                self.logger.warning(
+                    "settle_factor in the Telescope config is deprecated. "
+                    f"Move it to the config of camera {paired_devices.camera_name}."
+                )
+                return telescope_config["settle_factor"]
+
+        return 0.0
+
     def _handle_pointing_correction(
         self,
         action: Action,
@@ -2734,10 +2764,7 @@ class Observatory:
         pointing_complete, wcs_solve = self.pointing_correction(
             action, filepath, paired_devices, sync=False, slew=True
         )
-        settle_factor = paired_devices.get_device_config("Telescope").get(
-            "settle_factor", 0.0
-        )
-        time.sleep(exptime * settle_factor)
+        time.sleep(exptime * self.get_settle_factor(paired_devices))
         pointing_attempts += 1
 
         if wcs_solve is not None:
@@ -3132,10 +3159,7 @@ class Observatory:
             action_value["dec"] = target_radec.dec.deg  # type: ignore
             self.setup_observatory(paired_devices, action_value)
 
-            telescope_settle_factor = paired_devices.get_device_config("Telescope").get(
-                "settle_factor", 0.0
-            )
-            time.sleep(exptime * telescope_settle_factor)  # for spirit
+            time.sleep(exptime * self.get_settle_factor(paired_devices))
 
             # perform exposure
             success, filepath = self.perform_exposure(
